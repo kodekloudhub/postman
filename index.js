@@ -1,9 +1,25 @@
 const express = require("express");
+const cookieParser = require("cookie-parser");
+const sessions = require("express-session");
+const bcrypt = require("bcryptjs");
 const { sequelizeConnect } = require("./database/sequalize");
 const { Product } = require("./models/ProductModel");
 const { User } = require("./models/UserModel");
+const { protect } = require("./middleware/protect");
 
 const app = express();
+
+const oneDay = 1000 * 60 * 60 * 24;
+app.use(
+  sessions({
+    secret: "mysecret",
+    saveUninitialized: true,
+    cookie: { maxAge: oneDay },
+    resave: false,
+  })
+);
+
+app.use(cookieParser());
 
 app.use(express.json());
 
@@ -36,7 +52,7 @@ app.get("/products/:id", async (req, res) => {
   }
 });
 
-app.post("/products", async (req, res) => {
+app.post("/products", protect, async (req, res) => {
   const { name, price, category } = req.body;
   try {
     const product = await Product.create({ name, price, category });
@@ -46,7 +62,7 @@ app.post("/products", async (req, res) => {
   }
 });
 
-app.patch("/products/:id", async (req, res) => {
+app.patch("/products/:id", protect, async (req, res) => {
   const id = req.params.id;
   const body = req.body;
 
@@ -68,7 +84,7 @@ app.patch("/products/:id", async (req, res) => {
   }
 });
 
-app.delete("/products/:id", async (req, res) => {
+app.delete("/products/:id", protect, async (req, res) => {
   const id = req.params.id;
 
   try {
@@ -85,6 +101,50 @@ app.delete("/products/:id", async (req, res) => {
     }
 
     res.status(204).json();
+  } catch (e) {
+    res.status(500).json({ message: e });
+  }
+});
+
+app.post("/login", async (req, res) => {
+  const { email, password } = req.body;
+  try {
+    const user = await User.findOne({ where: { email } });
+    if (!user) {
+      return res.status(404).json({
+        message: "incorrect username or password",
+      });
+    }
+
+    const isCorrect = await bcrypt.compare(password, user.password);
+    if (isCorrect) {
+      req.session.user = user;
+      res.status(200).json({
+        status: "success",
+      });
+    } else {
+      res.status(400).json({
+        message: "incorrect username or password",
+      });
+    }
+  } catch (e) {
+    res.status(500).json({ message: e });
+  }
+});
+
+app.post("/signup", async (req, res) => {
+  const { email, password } = req.body;
+
+  try {
+    const hashpassword = await bcrypt.hash(password, 12);
+    const newUser = await User.create({
+      email,
+      password: hashpassword,
+    });
+    req.session.user = newUser;
+    res.status(201).json({
+      user: newUser,
+    });
   } catch (e) {
     res.status(500).json({ message: e });
   }
